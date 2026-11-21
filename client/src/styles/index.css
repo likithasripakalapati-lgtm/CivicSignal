@@ -1,0 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", "Noto Sans Telugu", ui-sans-serif, system-ui, sans-serif;
+  --color-canvas: #f7f8f5;
+  --color-forest: #173d32;
+  --color-lime: #c9e879;
+  --color-ink: #1c2924;
+  --color-muted: #77827c;
+  --color-line: #e7eae5;
+  --color-soft: #eef3e7;
+}
+
+:root { font-family: var(--font-sans); font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible { outline: 3px solid #86a94b; outline-offset: 3px; }

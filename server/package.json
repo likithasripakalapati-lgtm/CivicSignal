@@ -1,0 +1,36 @@
+{
+  "name": "@civicsignal/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "vitest run",
+    "test:ocr": "vitest run tests/ocr.integration.test.js",
+    "ocr:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ocr.ps1",
+    "ocr:verify": "node scripts/verify-ocr.js",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@google/genai": "^3.6.1",
+    "@napi-rs/canvas": "^1.1.1",
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^9.0.2",
+    "multer": "^2.5.0",
+    "pdfjs-dist": "^6.5.438",
+    "tesseract.js": "^7.0.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.2.3",
+    "supertest": "^7.1.4",
+    "vitest": "^3.2.4"
+  }
+}

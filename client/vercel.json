@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://civicsignal-api-p7ev.onrender.com/api/$1"
+    }
+  ]
+}

@@ -46,7 +46,7 @@ beforeEach(() => {
 });
 
 describe('bilingual notice analysis', () => {
-  it('constrains Gemini JSON output and identifies structurally incomplete extraction', async () => {
+  it('omits extraction array limits from Gemini JSON schema but retains its structure', async () => {
     const incompleteExtraction = { ...extraction };
     delete incompleteExtraction.referenceNumbers;
     googleMocks.generateContent.mockResolvedValueOnce(jsonResponse(incompleteExtraction));
@@ -66,11 +66,41 @@ describe('bilingual notice analysis', () => {
       type: 'object',
       additionalProperties: false,
       properties: {
-        referenceNumbers: { type: 'array', maxItems: 30 },
+        referenceNumbers: { type: 'array' },
       },
     });
     expect(request.config.responseJsonSchema.required).toContain('referenceNumbers');
     expect(JSON.stringify(request.config.responseJsonSchema)).not.toMatch(/minLength|maxLength|\$schema/);
+    expect(JSON.stringify(request.config.responseJsonSchema)).not.toContain('maxItems');
+  });
+
+  it.each([
+    ['importantDates', 41],
+    ['locations', 51],
+    ['citizenInstructions', 51],
+    ['referenceNumbers', 31],
+  ])('still enforces the Zod %s limit after generation', async (field, itemCount) => {
+    googleMocks.generateContent.mockResolvedValueOnce(jsonResponse({
+      ...extraction,
+      [field]: Array.from({ length: itemCount }, (_, index) => ({
+        value: `Date ${index + 1}`,
+        evidence: 'PUBLIC NOTICE',
+        pageNumber: 1,
+      })),
+    }));
+
+    await expect(analyzeNoticeText([{
+      pageNumber: 1,
+      method: 'digital',
+      text: 'PUBLIC NOTICE',
+    }])).rejects.toMatchObject({
+      code: 'GEMINI_INVALID_RESPONSE',
+      failureReason: 'extraction_schema',
+    });
+
+    expect(googleMocks.generateContent).toHaveBeenCalledTimes(1);
+    expect(googleMocks.generateContent.mock.calls[0][0].config.responseJsonSchema)
+      .not.toHaveProperty(`properties.${field}.maxItems`);
   });
 
   it.each([
@@ -214,8 +244,19 @@ describe('bilingual notice analysis', () => {
     }]);
     expect(googleMocks.generateContent.mock.calls[0][0].config.responseJsonSchema.required)
       .toEqual(expect.arrayContaining(['documentCategory', 'referenceNumbers']));
+    expect(JSON.stringify(googleMocks.generateContent.mock.calls[0][0].config.responseJsonSchema))
+      .not.toContain('maxItems');
     expect(googleMocks.generateContent.mock.calls[1][0].config.responseJsonSchema.required)
       .toEqual(expect.arrayContaining(['translatedPages', 'simpleExplanation']));
+    expect(googleMocks.generateContent.mock.calls[1][0].config.responseJsonSchema)
+      .toMatchObject({
+        properties: {
+          translatedPages: { maxItems: 8 },
+          simpleExplanation: {
+            properties: { evidence: { maxItems: 20 } },
+          },
+        },
+      });
     expect(result.simpleExplanation.sections).toHaveLength(1);
     expect(result.simpleExplanation.sections[0].english).toBe('Water supply will stop in Tambaram.');
   });

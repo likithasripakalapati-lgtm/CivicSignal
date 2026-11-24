@@ -146,14 +146,17 @@ function fail(code, message, failureReason) {
   });
 }
 
-function toGeminiJsonSchema(schema) {
+function toGeminiJsonSchema(schema, { omitMaxItems = false } = {}) {
   const visit = (value) => {
     if (Array.isArray(value)) return value.map(visit);
     if (!value || typeof value !== 'object') return value;
 
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([key]) => GEMINI_JSON_SCHEMA_KEYS.has(key))
+        .filter(([key]) => (
+          GEMINI_JSON_SCHEMA_KEYS.has(key)
+          && !(omitMaxItems && key === 'maxItems')
+        ))
         .map(([key, child]) => [
           key,
           (key === 'properties' || key === '$defs') && child && typeof child === 'object'
@@ -277,7 +280,7 @@ function createAiClient() {
   });
 }
 
-async function generateJson(prompt, outputSchema) {
+async function generateJson(prompt, outputSchema, schemaOptions) {
   const ai = createAiClient();
   let response;
 
@@ -287,7 +290,7 @@ async function generateJson(prompt, outputSchema) {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
-        ...(outputSchema ? { responseJsonSchema: toGeminiJsonSchema(outputSchema) } : {}),
+        ...(outputSchema ? { responseJsonSchema: toGeminiJsonSchema(outputSchema, schemaOptions) } : {}),
         temperature: 0.1,
       },
     });
@@ -442,7 +445,9 @@ ${sourceText}
 SOURCE DOCUMENT END
 `;
 
-  const parsedExtraction = await generateJson(extractionPrompt, noticeFactSchema);
+  const parsedExtraction = await generateJson(extractionPrompt, noticeFactSchema, {
+    omitMaxItems: true,
+  });
   for (const key of ['documentCategory', 'title', 'issuingDepartment', 'noticeDate']) {
     if (
       parsedExtraction[key]

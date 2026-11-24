@@ -46,6 +46,33 @@ beforeEach(() => {
 });
 
 describe('bilingual notice analysis', () => {
+  it('constrains Gemini JSON output and identifies structurally incomplete extraction', async () => {
+    const incompleteExtraction = { ...extraction };
+    delete incompleteExtraction.referenceNumbers;
+    googleMocks.generateContent.mockResolvedValueOnce(jsonResponse(incompleteExtraction));
+
+    await expect(analyzeNoticeText([{
+      pageNumber: 1,
+      method: 'digital',
+      text: 'PUBLIC NOTICE',
+    }])).rejects.toMatchObject({
+      code: 'GEMINI_INVALID_RESPONSE',
+      failureReason: 'extraction_schema',
+    });
+
+    const request = googleMocks.generateContent.mock.calls[0][0];
+    expect(request.config.responseMimeType).toBe('application/json');
+    expect(request.config.responseJsonSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        referenceNumbers: { type: 'array', maxItems: 30 },
+      },
+    });
+    expect(request.config.responseJsonSchema.required).toContain('referenceNumbers');
+    expect(JSON.stringify(request.config.responseJsonSchema)).not.toMatch(/minLength|maxLength|\$schema/);
+  });
+
   it('logs only safe Gemini error metadata when the API request fails', async () => {
     googleMocks.generateContent.mockRejectedValueOnce(Object.assign(
       new Error('Sensitive provider response'),
@@ -102,6 +129,10 @@ describe('bilingual notice analysis', () => {
       englishText: 'PUBLIC NOTICE. Water supply interruption in Tambaram.',
       teluguText: 'ప్రజా నోటీసు. తంబరం లో నీటి సరఫరా నిలిపివేత.',
     }]);
+    expect(googleMocks.generateContent.mock.calls[0][0].config.responseJsonSchema.required)
+      .toEqual(expect.arrayContaining(['documentCategory', 'referenceNumbers']));
+    expect(googleMocks.generateContent.mock.calls[1][0].config.responseJsonSchema.required)
+      .toEqual(expect.arrayContaining(['translatedPages', 'simpleExplanation']));
     expect(result.simpleExplanation.sections).toHaveLength(1);
     expect(result.simpleExplanation.sections[0].english).toBe('Water supply will stop in Tambaram.');
   });

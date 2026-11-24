@@ -87,9 +87,55 @@ const assistantAnswerSchema = z.object({
 
 const MAX_TRANSLATION_BATCH_PAGES = 8;
 const MAX_TRANSLATION_BATCH_CHARACTERS = 60_000;
+const GEMINI_JSON_SCHEMA_KEYS = new Set([
+  '$id',
+  '$defs',
+  '$ref',
+  '$anchor',
+  'type',
+  'format',
+  'title',
+  'description',
+  'enum',
+  'items',
+  'prefixItems',
+  'minItems',
+  'maxItems',
+  'minimum',
+  'maximum',
+  'anyOf',
+  'oneOf',
+  'properties',
+  'additionalProperties',
+  'required',
+  'propertyOrdering',
+]);
 
-function fail(code, message) {
-  return Object.assign(new Error(message), { code });
+function fail(code, message, failureReason) {
+  return Object.assign(new Error(message), {
+    code,
+    ...(failureReason ? { failureReason } : {}),
+  });
+}
+
+function toGeminiJsonSchema(schema) {
+  const visit = (value) => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!value || typeof value !== 'object') return value;
+
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => GEMINI_JSON_SCHEMA_KEYS.has(key))
+        .map(([key, child]) => [
+          key,
+          (key === 'properties' || key === '$defs') && child && typeof child === 'object'
+            ? Object.fromEntries(Object.entries(child).map(([name, item]) => [name, visit(item)]))
+            : visit(child),
+        ]),
+    );
+  };
+
+  return visit(z.toJSONSchema(schema));
 }
 
 function normalizeText(value) {
@@ -142,7 +188,7 @@ function createAiClient() {
   });
 }
 
-async function generateJson(prompt) {
+async function generateJson(prompt, outputSchema) {
   const ai = createAiClient();
   let response;
 
@@ -152,6 +198,7 @@ async function generateJson(prompt) {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
+        ...(outputSchema ? { responseJsonSchema: toGeminiJsonSchema(outputSchema) } : {}),
         temperature: 0.1,
       },
     });
@@ -224,6 +271,7 @@ function validateBilingualOutput(translatedPages, sections, sourcePages) {
     throw fail(
       'GEMINI_INVALID_RESPONSE',
       'The bilingual output did not include exactly one result for every source page.',
+      'page_coverage',
     );
   }
 
@@ -298,7 +346,7 @@ ${sourceText}
 SOURCE DOCUMENT END
 `;
 
-  const parsedExtraction = await generateJson(extractionPrompt);
+  const parsedExtraction = await generateJson(extractionPrompt, noticeFactSchema);
   for (const key of ['documentCategory', 'title', 'issuingDepartment', 'noticeDate']) {
     if (
       parsedExtraction[key]
@@ -314,6 +362,7 @@ SOURCE DOCUMENT END
     throw fail(
       'GEMINI_INVALID_RESPONSE',
       'Gemini returned information in an unexpected format.',
+      'extraction_schema',
     );
   }
   validateEvidence(factResult.data, validPages);
@@ -364,12 +413,13 @@ ${batchSourceText}
 SOURCE PAGES END
 `;
 
-    const parsedBatch = await generateJson(translationPrompt);
+    const parsedBatch = await generateJson(translationPrompt, bilingualBatchSchema);
     const batchResult = bilingualBatchSchema.safeParse(parsedBatch);
     if (!batchResult.success) {
       throw fail(
         'GEMINI_INVALID_RESPONSE',
         'Gemini returned a translation or explanation in an unexpected format.',
+        'translation_schema',
       );
     }
 
@@ -406,6 +456,7 @@ SOURCE PAGES END
     throw fail(
       'GEMINI_INVALID_RESPONSE',
       'Gemini returned information in an unexpected format.',
+      'final_schema',
     );
   }
 

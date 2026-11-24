@@ -177,10 +177,17 @@ export async function analyzeNotice(req, res) {
     const errorCode = allowedCodes.includes(error.code)
       ? error.code
       : 'GEMINI_REQUEST_FAILED';
+    const allowedFailureReasons = [
+      'extraction_schema',
+      'translation_schema',
+      'page_coverage',
+      'final_schema',
+    ];
 
     console.error('Notice analysis failed', {
       stage: failureStage,
       code: errorCode,
+      reason: allowedFailureReasons.includes(error?.failureReason) ? error.failureReason : null,
       errorName: ['ApiError', 'GoogleGenAIError', 'Error', 'TypeError', 'MongooseError', 'MongoServerError']
         .includes(error?.name)
         ? error.name

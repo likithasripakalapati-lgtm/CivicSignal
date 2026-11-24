@@ -345,6 +345,47 @@ it('analyses extracted notices, saves results, and restricts access to the owner
   expect(forbidden.status).toBe(404);
 });
 
+it.each([
+  ['GEMINI_EVIDENCE_INVALID', 502],
+  ['ANALYSIS_INPUT_TOO_LARGE', 413],
+  ['ANALYSIS_INPUT_EMPTY', 409],
+])('returns a precise status and logs no document text for %s', async (code, status) => {
+  const owner = await createCitizen();
+  const uploaded = await upload(owner);
+  const noticeId = uploaded.body.notice.id;
+  await ProcessingJob.updateOne({ noticeId }, {
+    $set: {
+      status: 'completed',
+      extractedPages: [{ pageNumber: 1, method: 'digital', text: 'PRIVATE NOTICE CONTENT' }],
+    },
+  });
+  analyzeNoticeText.mockRejectedValueOnce(Object.assign(
+    new Error('PRIVATE NOTICE CONTENT must not appear in logs'),
+    { code },
+  ));
+  const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  try {
+    const response = await owner.post(`/api/v1/notices/${noticeId}/analyze`)
+      .set('Origin', origin)
+      .set('X-CSRF-Token', owner.csrfToken)
+      .send({});
+
+    expect(response.status).toBe(status);
+    expect(response.body.error.code).toBe(code);
+    expect(errorLog).toHaveBeenCalledWith('Notice analysis failed', expect.objectContaining({
+      stage: 'analysis',
+      code,
+    }));
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain('PRIVATE NOTICE CONTENT');
+
+    const savedJob = await ProcessingJob.findOne({ noticeId }).lean();
+    expect(savedJob.analysisErrorCode).toBe(code);
+  } finally {
+    errorLog.mockRestore();
+  }
+});
+
   it('stores official source match evidence without changing the notice authenticity status', async () => {
     const owner = await createCitizen();
     const uploaded = await upload(owner);

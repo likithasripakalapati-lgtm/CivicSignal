@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { config } from '../config/env.js';
 import { login, logout, register } from '../controllers/auth.controller.js';
 import { requireTrustedOrigin, validateOptionalTrustedOrigin } from '../middleware/requireTrustedOrigin.js';
@@ -12,6 +12,7 @@ const router = Router();
 const authRateLimit = rateLimit({
   windowMs: config.authRateLimitWindowMs,
   limit: config.authRateLimitMax,
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many attempts. Please try again later.' } },

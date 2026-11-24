@@ -40,6 +40,8 @@ analysisErrorCode: {
     'GEMINI_EVIDENCE_INVALID',
     'GEMINI_EMPTY_RESPONSE',
     'GEMINI_INVALID_JSON',
+    'ANALYSIS_INPUT_EMPTY',
+    'ANALYSIS_INPUT_TOO_LARGE',
   ],
   default: null,
 },

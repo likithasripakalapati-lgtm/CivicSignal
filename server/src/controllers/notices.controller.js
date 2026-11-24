@@ -143,9 +143,11 @@ export async function analyzeNotice(req, res) {
     });
   }
 
+  let failureStage = 'analysis';
   try {
     const analysis = await analyzeNoticeText(job.extractedPages);
 
+    failureStage = 'persistence';
     await ProcessingJob.updateOne(
       { _id: job._id, ownerId: req.auth.userId },
       {
@@ -168,11 +170,22 @@ export async function analyzeNotice(req, res) {
       'GEMINI_EVIDENCE_INVALID',
       'GEMINI_EMPTY_RESPONSE',
       'GEMINI_INVALID_JSON',
+      'ANALYSIS_INPUT_EMPTY',
+      'ANALYSIS_INPUT_TOO_LARGE',
     ];
 
     const errorCode = allowedCodes.includes(error.code)
       ? error.code
       : 'GEMINI_REQUEST_FAILED';
+
+    console.error('Notice analysis failed', {
+      stage: failureStage,
+      code: errorCode,
+      errorName: ['ApiError', 'GoogleGenAIError', 'Error', 'TypeError', 'MongooseError', 'MongoServerError']
+        .includes(error?.name)
+        ? error.name
+        : 'OtherError',
+    });
 
     await ProcessingJob.updateOne(
       { _id: job._id, ownerId: req.auth.userId },
@@ -185,11 +198,14 @@ export async function analyzeNotice(req, res) {
       },
     );
 
-    const statusCode = errorCode === 'GEMINI_RATE_LIMITED'
-      ? 429
-      : errorCode === 'GEMINI_UNAVAILABLE'
-        ? 503
-        : 502;
+    const statusCodeByErrorCode = {
+      GEMINI_RATE_LIMITED: 429,
+      GEMINI_UNAVAILABLE: 503,
+      GEMINI_NOT_CONFIGURED: 503,
+      ANALYSIS_INPUT_TOO_LARGE: 413,
+      ANALYSIS_INPUT_EMPTY: 409,
+    };
+    const statusCode = statusCodeByErrorCode[errorCode] ?? 502;
 
     return res.status(statusCode).json({
       error: {

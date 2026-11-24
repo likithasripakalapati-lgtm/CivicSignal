@@ -163,6 +163,17 @@ async function generateJson(prompt) {
         ? 'GEMINI_UNAVAILABLE'
         : 'GEMINI_REQUEST_FAILED';
 
+    const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code)
+      ? error.code
+      : undefined;
+    console.error('Gemini request failed', {
+      status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+      errorCode,
+      errorName: ['ApiError', 'GoogleGenAIError', 'Error', 'TypeError'].includes(error?.name)
+        ? error.name
+        : 'OtherError',
+    });
+
     throw fail(code, 'Gemini could not analyze the notice right now.');
   }
 

@@ -46,6 +46,31 @@ beforeEach(() => {
 });
 
 describe('bilingual notice analysis', () => {
+  it('logs only safe Gemini error metadata when the API request fails', async () => {
+    googleMocks.generateContent.mockRejectedValueOnce(Object.assign(
+      new Error('Sensitive provider response'),
+      { status: 404, code: 'MODEL_NOT_FOUND' },
+    ));
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(analyzeNoticeText([{
+        pageNumber: 1,
+        method: 'digital',
+        text: 'PUBLIC NOTICE',
+      }])).rejects.toMatchObject({ code: 'GEMINI_REQUEST_FAILED' });
+
+      expect(errorLog).toHaveBeenCalledWith('Gemini request failed', {
+        status: 404,
+        errorCode: 'MODEL_NOT_FOUND',
+        errorName: 'Error',
+      });
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain('Sensitive provider response');
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it('returns faithful page translations and bilingual simple explanations', async () => {
     googleMocks.generateContent
       .mockResolvedValueOnce(jsonResponse(extraction))

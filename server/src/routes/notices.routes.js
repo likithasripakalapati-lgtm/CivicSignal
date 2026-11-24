@@ -18,11 +18,12 @@ import { requireTrustedOrigin } from '../middleware/requireTrustedOrigin.js';
 import { verifyCsrf } from '../middleware/verifyCsrf.js';
 import { validateRequest } from '../middleware/validateRequest.js';
 import { sourceCandidateSchema } from '../schemas/sourceVerification.schemas.js';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 const sourceVerificationRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 5,
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many verification attempts. Please try again later.' } },

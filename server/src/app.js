@@ -12,6 +12,7 @@ import { config } from './config/env.js';
 
 const app = express();
 
+if (config.isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(cors({
   origin(origin, callback) {

@@ -73,10 +73,95 @@ describe('bilingual notice analysis', () => {
     expect(JSON.stringify(request.config.responseJsonSchema)).not.toMatch(/minLength|maxLength|\$schema/);
   });
 
-  it('logs only safe Gemini error metadata when the API request fails', async () => {
+  it.each([
+    {
+      name: 'extracts only allow-listed provider validation details',
+      error: {
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: 'Invalid JSON payload received. Unknown name "minLength" at \'generation_config.response_json_schema\': Cannot find field.',
+        },
+      },
+      expected: {
+        providerCode: 400,
+        providerStatus: 'INVALID_ARGUMENT',
+        providerMessage: 'Unknown request field "minLength" at "generation_config.response_json_schema".',
+      },
+      forbidden: ['private notice text', 'private-api-key'],
+    },
+    {
+      name: 'uses safe fallback fields for malformed provider JSON',
+      error: 'not-json private notice text private-api-key',
+      expected: { providerCode: null, providerStatus: null, providerMessage: null },
+      forbidden: ['not-json', 'private notice text', 'private-api-key'],
+    },
+    {
+      name: 'omits unsafe provider message content',
+      error: {
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: 'Invalid JSON payload received. Unknown name "private-api-key" at \'generation_config\': Cannot find field.',
+          details: [{ user: 'private notice text' }],
+        },
+      },
+      expected: {
+        providerCode: 400,
+        providerStatus: 'INVALID_ARGUMENT',
+        providerMessage: null,
+      },
+      forbidden: ['private-api-key', 'private notice text'],
+    },
+    {
+      name: 'handles missing optional provider fields',
+      error: { error: { code: 400 } },
+      expected: { providerCode: 400, providerStatus: null, providerMessage: null },
+      forbidden: [],
+    },
+  ])('$name', async ({ error, expected, forbidden }) => {
+    const errorMessage = typeof error === 'string' ? error : JSON.stringify(error);
     googleMocks.generateContent.mockRejectedValueOnce(Object.assign(
-      new Error('Sensitive provider response'),
-      { status: 404, code: 'MODEL_NOT_FOUND' },
+      new Error(errorMessage),
+      { status: 400, code: 'UNSAFE_TOP_LEVEL_CODE', headers: { authorization: 'private-api-key' } },
+    ));
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(analyzeNoticeText([{
+        pageNumber: 1,
+        method: 'digital',
+        text: 'private notice text',
+      }])).rejects.toMatchObject({ code: 'GEMINI_REQUEST_FAILED' });
+
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      const [label, logged] = errorLog.mock.calls[0];
+      expect(label).toBe('Gemini request failed');
+      expect(logged).toMatchObject({
+        status: 400,
+        ...expected,
+        model: expect.any(String),
+        responseJsonSchema: true,
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+        errorName: 'Error',
+      });
+      expect(logged).not.toHaveProperty('errorCode');
+      const serializedLog = JSON.stringify(errorLog.mock.calls);
+      for (const value of forbidden) {
+        expect(serializedLog).not.toContain(value);
+      }
+      expect(serializedLog).not.toContain('UNSAFE_TOP_LEVEL_CODE');
+      expect(serializedLog).not.toContain('authorization');
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it('uses null provider details when the provider error JSON is oversized', async () => {
+    googleMocks.generateContent.mockRejectedValueOnce(Object.assign(
+      new Error(JSON.stringify({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'x'.repeat(5000) } })),
+      { status: 400 },
     ));
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -86,13 +171,11 @@ describe('bilingual notice analysis', () => {
         method: 'digital',
         text: 'PUBLIC NOTICE',
       }])).rejects.toMatchObject({ code: 'GEMINI_REQUEST_FAILED' });
-
-      expect(errorLog).toHaveBeenCalledWith('Gemini request failed', {
-        status: 404,
-        errorCode: 'MODEL_NOT_FOUND',
-        errorName: 'Error',
+      expect(errorLog.mock.calls[0][1]).toMatchObject({
+        providerCode: null,
+        providerStatus: null,
+        providerMessage: null,
       });
-      expect(JSON.stringify(errorLog.mock.calls)).not.toContain('Sensitive provider response');
     } finally {
       errorLog.mockRestore();
     }

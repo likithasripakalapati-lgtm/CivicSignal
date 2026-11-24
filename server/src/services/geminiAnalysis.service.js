@@ -87,6 +87,34 @@ const assistantAnswerSchema = z.object({
 
 const MAX_TRANSLATION_BATCH_PAGES = 8;
 const MAX_TRANSLATION_BATCH_CHARACTERS = 60_000;
+const MAX_PROVIDER_ERROR_MESSAGE_LENGTH = 4096;
+const SAFE_MODEL_IDENTIFIER = /^(?:models\/)?gemini-[A-Za-z0-9.-]{1,80}$/;
+const SAFE_PROVIDER_STATUS = /^[A-Z][A-Z0-9_]{0,63}$/;
+const SAFE_PROVIDER_VALIDATION_FIELDS = new Set([
+  '$defs',
+  '$schema',
+  'additionalProperties',
+  'anyOf',
+  'enum',
+  'exclusiveMinimum',
+  'format',
+  'items',
+  'maxItems',
+  'maxLength',
+  'maximum',
+  'minItems',
+  'minLength',
+  'minimum',
+  'oneOf',
+  'properties',
+  'propertyOrdering',
+  'required',
+  'responseJsonSchema',
+  'responseMimeType',
+  'responseSchema',
+  'temperature',
+  'type',
+]);
 const GEMINI_JSON_SCHEMA_KEYS = new Set([
   '$id',
   '$defs',
@@ -136,6 +164,67 @@ function toGeminiJsonSchema(schema) {
   };
 
   return visit(z.toJSONSchema(schema));
+}
+
+function getSafeProviderErrorDetails(error) {
+  const details = {
+    providerCode: null,
+    providerStatus: null,
+    providerMessage: null,
+  };
+
+  if (
+    typeof error?.message !== 'string'
+    || error.message.length === 0
+    || error.message.length > MAX_PROVIDER_ERROR_MESSAGE_LENGTH
+  ) {
+    return details;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(error.message);
+  } catch {
+    return details;
+  }
+
+  const providerError = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload.error
+    : null;
+  if (!providerError || typeof providerError !== 'object' || Array.isArray(providerError)) {
+    return details;
+  }
+
+  if (
+    Number.isInteger(providerError.code)
+    && providerError.code >= 100
+    && providerError.code <= 599
+  ) {
+    details.providerCode = providerError.code;
+  }
+  if (
+    typeof providerError.status === 'string'
+    && SAFE_PROVIDER_STATUS.test(providerError.status)
+  ) {
+    details.providerStatus = providerError.status;
+  }
+
+  if (typeof providerError.message !== 'string' || providerError.message.length > 500) {
+    return details;
+  }
+
+  const unknownField = providerError.message.match(
+    /^Invalid JSON payload received\. Unknown name "([A-Za-z][A-Za-z0-9_]*)" at '(generation_config|generation_config\.response_json_schema)': Cannot find field\.$/,
+  );
+  if (unknownField && SAFE_PROVIDER_VALIDATION_FIELDS.has(unknownField[1])) {
+    details.providerMessage = `Unknown request field "${unknownField[1]}" at "${unknownField[2]}".`;
+  } else if (
+    /^Invalid value at 'generation_config\.response_json_schema'\.$/.test(providerError.message)
+  ) {
+    details.providerMessage = 'Invalid responseJsonSchema configuration.';
+  }
+
+  return details;
 }
 
 function normalizeText(value) {
@@ -203,19 +292,26 @@ async function generateJson(prompt, outputSchema) {
       },
     });
   } catch (error) {
-    const status = Number(error?.status);
+    const status = Number.isInteger(error?.status) ? error.status : null;
     const code = status === 429
       ? 'GEMINI_RATE_LIMITED'
       : status >= 500
         ? 'GEMINI_UNAVAILABLE'
         : 'GEMINI_REQUEST_FAILED';
 
-    const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code)
-      ? error.code
-      : undefined;
+    const providerError = getSafeProviderErrorDetails(error);
+    const requestMetadata = {
+      model: typeof config.geminiModel === 'string' && SAFE_MODEL_IDENTIFIER.test(config.geminiModel)
+        ? config.geminiModel
+        : null,
+      responseJsonSchema: Boolean(outputSchema),
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+    };
     console.error('Gemini request failed', {
-      status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
-      errorCode,
+      status: status >= 100 && status <= 599 ? status : null,
+      ...providerError,
+      ...requestMetadata,
       errorName: ['ApiError', 'GoogleGenAIError', 'Error', 'TypeError'].includes(error?.name)
         ? error.name
         : 'OtherError',
